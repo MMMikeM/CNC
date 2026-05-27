@@ -1,20 +1,12 @@
-G91                    ; Relative positioning
-G1 H1 Z130 F250        ; Home Z first
-G1 Z-2 F300            ; Back off Z
-G1 Z5 F1500            ; Lift Z a bit more for safety
+M98 P"homez.g"                       ; Home Z first for clearance
 
-G1 H1 X-800 F700       ; Then home X
-G1 X2 F300             ; Back off X
-G1 H1 X-4 F140         ; Precise X home
-
-M584 Y1 U2             ; Separate Y motors
-G1 H1 Y1300 F1200      ; Home Y (left)
-G1 Y-2 F300            ; Back off Y left
-G1 H1 Y4 F240          ; Precise Y left home
-G1 H1 U1300 F1200      ; Home Y (right)
-G1 U-2 F300            ; Back off Y right
-G1 H1 U4 F240          ; Precise Y right home
-M584 Y1:2              ; Recombine Y motors
-
-G90                    ; Absolute positioning
-G92 X0 Y1200 Z125      ; Set all axes positions
+; Parallel X + dual-Y home (Y split for de-racking)
+M584 Y1 U2                           ; Split Y motors
+G91                                  ; Relative
+G1 H1 X-800 Y1300 U1300 F5000        ; Parallel fast seek (capped by M203)
+G1 X2 Y-2 U-2 F5000                  ; Back off
+G1 H1 X-4 Y4 U4 F100                 ; Slow approach
+G1 X2 Y-2 U-2 F100                   ; Final back off
+M584 Y1:2                            ; Recombine
+G90                                  ; Absolute
+G92 X0 Y1200                         ; Set positions

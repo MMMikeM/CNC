@@ -1,8 +1,13 @@
-G91                    ; Relative positioning
-G1 H2 Z5 F1500        ; Lift Z
-G1 H1 X-800 F700      ; Fast seek
-G1 X2 F300            ; Back off 2mm
-G1 H1 X-4 F140        ; Slow approach
-G1 X2 F300            ; Final back off
-G90                   ; Absolute positioning
-G92 X0                ; Set X position
+; Ensure Z is at safe height before X home
+if !move.axes[2].homed
+    M98 P"homez.g"
+G90
+G1 Z125 F5000              ; Park Z at max for clearance
+
+G91                        ; Relative
+G1 H1 X-800 F5000          ; Fast seek (capped by M203)
+G1 X2 F5000                ; Back off
+G1 H1 X-4 F100             ; Slow approach
+G1 X2 F100                 ; Final back off
+G90                        ; Absolute
+G92 X0                     ; Set position
