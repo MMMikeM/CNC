@@ -355,10 +355,15 @@ not be assumed:
 - **Jumper positions**: limit-input VCC rail voltage, Speed-OUT AO/DO selection,
   RS485 MCU/SBC selector, V-DIR and V-EN rail selection, Vprobe and Vtool. All are
   physical and none are visible from software.
-- **Pin naming and mapping.** The authoritative source is
-  `boards/btt/scylla1_0uh723/rfpins.txt` on the SD card, not any existing config file.
-  Mirrored in `TeamGloomy_Scylla_V1_H723_Pins.md`; re-check against the SD card if the
-  firmware version changes, since PWM timer assignments differ between RRF 3.6 and 3.7.
+- **Pin naming and mapping.** Documented in `TeamGloomy_Scylla_V1_H723_Pins.md` and
+  verified 2026-09-01: the authoritative source is
+  [`boards/btt/scylla1_0_h723/rrfpins.txt`](https://github.com/gloomyandy/RRFBuild/blob/v3.6-dev/boards/btt/scylla1_0_h723/rrfpins.txt)
+  in the gloomyandy/RRFBuild repo, which is
+  compiled into the firmware binary — the strings embedded in the 3.6.3 Scylla build
+  are byte-identical to it, and both match the TeamGloomy table. (An earlier note here
+  claimed the file lives on the SD card; it does not, and the card also runs without a
+  `board.txt` in `/sys`.) Re-check on firmware upgrades, since PWM timer assignments
+  differ between RRF 3.6 and 3.7.
 - **Whether the Scylla's optoisolated limit inputs have hardware pullups fitted.** BTT
   publish no schematic for the input stage, so pullup and inversion requirements must
   be established by test.

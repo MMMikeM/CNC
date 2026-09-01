@@ -74,3 +74,12 @@ The below SPI channels are preconfigured in the firmware.
 | 6 | PE_12 | PE_13 | PE_14 | Hardware | WiFi |
 | 7 | NoPin | NoPin | NoPin | Hardware | None |
 | 8 | NoPin | NoPin | NoPin | Hardware | None |
+
+## Verification against firmware (2026-09-01)
+
+The pin aliases above were cross-checked against
+[`boards/btt/scylla1_0_h723/rrfpins.txt`](https://github.com/gloomyandy/RRFBuild/blob/v3.6-dev/boards/btt/scylla1_0_h723/rrfpins.txt)
+in gloomyandy/RRFBuild (v3.6-dev) and against
+the strings embedded in the released `firmware_scylla1_0_h723.bin` v3.6.3. All three
+sources are identical. The pin table is compiled into the firmware; no `rrfpins.txt`
+or `board.txt` is present or required on the SD card.
