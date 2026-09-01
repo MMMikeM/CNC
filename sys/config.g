@@ -49,8 +49,12 @@ M574 X1 S1 P"^D.11"             ; X-MIN
 M574 Y2 S1 P"^D.14+^D.13"       ; Y-MAX, one pin per motor, order matches M584 Y1:2
 M574 Z2 S1 P"^D.12"             ; Z-MAX
 
-; Spindle - RS485 Huanyang VFD
-M950 R0 C"B.1" L0:24000         ; Spindle on spindlepwm pin, 0-24000 RPM
+; Spindle - hardware enable/direction, speed over RS485 (Huanyang VFD)
+; Wiring: SP-EN -> VFD FOR, SP-DIR -> VFD REV, SP-COM -> VFD DCM. VFD: PD001=1
+; (terminal run = failsafe stop path), PD002=2 (RS485 speed). If enable or
+; direction act inverted, prefix C.5 / B.0 with '!' - optoisolator polarity
+; depends on the V-EN / V-DIR jumpers (MACHINE.md s.6).
+M950 R0 C"B.1+C.5+B.0" L0:24000 ; PWM (unused), enable spindleen, dir spindledir
 M563 P0 R0 S"Spindle"           ; Tool 0
 M453                            ; CNC mode (no parameters in RRF 3.3+)
 T0                              ; Select tool 0 so M3/M5 work without a manual T0
