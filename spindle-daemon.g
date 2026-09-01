@@ -1,178 +1,80 @@
-; spindle-daemon.g - Huanyang HY02D223B VFD monitor
-; Reads spindles[0] state from RRF, drives VFD via Modbus, watches for faults.
+; spindle-daemon.g - Huanyang HY02D223B VFD control over RS485
+; Mirrors spindles[0] state (set by M3/M4/M5 and S) to the VFD via M260.4 raw
+; Modbus, and publishes VFD readings to globals for DWC/macros.
+;
+; Protocol: see Huanyang_RS485_Protocol_Notes.md. Frames below exclude the slave
+; address and CRC - M260.4 adds both. Requires in config.g:
+;   M575 P1 B9600 S7            ; RS485 port in Device mode
+; and on the VFD: PD001=2, PD002=2, PD163=1, PD164=1 (9600), PD165=3 (RTU 8N1).
+;
+; Error handling: a failed M260.4 (timeout/bad CRC) aborts this macro. RRF then
+; restarts daemon.g roughly 10s later; all state lives in globals so the restart
+; resumes cleanly. The VFD holds its last commanded state across the gap - a
+; hardwired enable line remains the only true failsafe (MACHINE.md s.4).
 
-; ====================================
-; CONFIG
-; ====================================
-if {!exists(global.configMaxRPM)}
-    global configMaxRPM = 24000
-if {!exists(global.configMaxHz)}
-    global configMaxHz = 400
-if {!exists(global.configPollingMs)}
-    global configPollingMs = 200
-if {!exists(global.configMaxErrors)}
-    global configMaxErrors = 5
-
-; ====================================
-; STATE
-; ====================================
-if {!exists(global.runDaemon)}
+if !exists(global.runDaemon)
     global runDaemon = true
-if {!exists(global.spindleState)}
-    global spindleState = "STOP"
-if {!exists(global.currentVfdHz)}
-    global currentVfdHz = 0
-if {!exists(global.lastSetFrequency)}
-    global lastSetFrequency = 0
-if {!exists(global.vfdFaultCode)}
-    global vfdFaultCode = 0
-if {!exists(global.loadPercentage)}
-    global loadPercentage = 0
-if {!exists(global.errorCount)}
-    global errorCount = 0
+if !exists(global.vfdState)
+    global vfdState = "STOP"    ; last commanded VFD state: "STOP", "CW", "CCW"
+if !exists(global.vfdHz)
+    global vfdHz = 0.0          ; output frequency read back from the VFD
+if !exists(global.vfdAmps)
+    global vfdAmps = 0.0        ; output current read back from the VFD
+if !exists(global.vfdSetHz100)
+    global vfdSetHz100 = 0      ; last commanded frequency, Hz x 100
 
-; ====================================
-; HELPERS
-; ====================================
-
-; Read a VFD register with retry. Returns success bool in result.
-function readVfdRegister(register, expectedLength, resultVar)
-    var highByte = floor(var.register / 256)
-    var lowByte = var.register - (var.highByte * 256)
-    var retries = 0
-    while var.retries < 3
-        M260.4 P1 A1 B{{0x04, 0x03, var.highByte, var.lowByte, 0x00}} R{var.expectedLength} V{var.resultVar}
-        if {self[var.resultVar] != null}
-            result = true
-            return
-        set var.retries = var.retries + 1
-        G4 P20
-    result = false
-
-; Stop the spindle by commanding 0 Hz, wait briefly for decel.
-function stopSpindle()
-    M260.4 P1 A1 B{{0x05, 0x02, 0x00, 0x00}} R4
-    G4 P3
-    var waited = 0
-    while var.waited < 10
-        G4 P50
-        var ok = false
-        call readVfdRegister(0x0100, 5, "stopSpeed") ok
-        if !var.ok
-            break
-        if self.stopSpeed[3] * 256 + self.stopSpeed[4] == 0
-            break
-        set var.waited = var.waited + 1
-    M3 P0 S0
-    set global.spindleState = "STOP"
-    set global.lastSetFrequency = 0
-
-; Change direction. Stops first if currently spinning (mandatory on Huanyang).
-function setSpindleDirection(direction)
-    if var.direction == global.spindleState
-        return
-    if global.currentVfdHz > 0
-        call stopSpindle()
-    if var.direction == "CW"
-        M260.4 P1 A1 B{{0x03, 0x01, 0x01}} R3
-    elif var.direction == "CCW"
-        M260.4 P1 A1 B{{0x03, 0x01, 0x11}} R3
-    else
-        return
-    G4 P3
-    set global.spindleState = var.direction
-    M118 P0 S{"VFD: direction " ^ var.direction}
-
-; Set spindle speed. VFD's own PD014/PD015 handle accel/decel ramping.
-function setSpindleSpeed(targetRPM)
-    var targetHz = var.targetRPM / global.configMaxRPM * global.configMaxHz
-    if var.targetHz > global.configMaxHz
-        set var.targetHz = global.configMaxHz
-    if abs(global.currentVfdHz - var.targetHz) > 0.25 && var.targetHz != global.lastSetFrequency
-        var scaled = floor(var.targetHz * 100)
-        var hi = floor(var.scaled / 256)
-        var lo = var.scaled - (var.hi * 256)
-        M260.4 P1 A1 B{{0x05, 0x02, var.hi, var.lo}} R4
-        G4 P3
-        set global.lastSetFrequency = var.targetHz
-
-; Check VFD fault register; if newly faulted, E-stop and halt daemon.
-function checkVfdFaults()
-    var ok = false
-    call readVfdRegister(0x03, 5, "faultResp") ok
-    if !var.ok
-        return
-    var code = self.faultResp[4]
-    if var.code == global.vfdFaultCode
-        return
-    set global.vfdFaultCode = var.code
-    if var.code == 0
-        M118 P0 S"VFD: fault cleared"
-        return
-    var msg = "VFD Fault " ^ var.code
-    if var.code == 1
-        set var.msg = var.msg ^ " (Overcurrent)"
-    elif var.code == 2
-        set var.msg = var.msg ^ " (Overvoltage)"
-    elif var.code == 3
-        set var.msg = var.msg ^ " (Overheating)"
-    elif var.code == 4
-        set var.msg = var.msg ^ " (Overload)"
-    M118 P0 S{var.msg}
-    M291 P{var.msg} R"VFD ERROR" S2 T5
-    M112
-    set global.runDaemon = false
-
-; Read output frequency and load percentage from VFD.
-function readVfdStatus()
-    var ok = false
-    call readVfdRegister(0x0100, 5, "outFreq") ok
-    if !var.ok
-        result = false
-        return
-    set global.currentVfdHz = (self.outFreq[3] * 256 + self.outFreq[4]) / 100.0
-    G4 P3
-    call readVfdRegister(0x0300, 5, "loadResp") ok
-    if var.ok
-        set global.loadPercentage = self.loadResp[4]
-    result = true
-
-; ====================================
-; MAIN LOOP
-; ====================================
-M118 P0 S{"VFD daemon started (max " ^ global.configMaxRPM ^ " RPM)"}
+M118 P0 S"VFD daemon started"
 
 while global.runDaemon
-    G4 P{global.configPollingMs}
+    G4 P500
 
-    var ok = false
-    call readVfdStatus() ok
-    if !var.ok
-        set global.errorCount = global.errorCount + 1
-        if global.errorCount >= global.configMaxErrors
-            M118 P0 S"VFD: comm failure, stopping spindle"
-            M260.4 P1 A1 B{{0x05, 0x02, 0x00, 0x00}} R4
-            M3 P0 S0
-            set global.spindleState = "STOP"
-            set global.errorCount = 0
-        continue
-    set global.errorCount = 0
+    ; --- poll VFD: output frequency (function 04, item 1 = OutF) ---
+    ; reply: [func, len, item, hi, lo]
+    M260.4 P1 A1 B{0x04, 0x01, 0x01} R5 V"outF"
+    set global.vfdHz = {(var.outF[3] * 256 + var.outF[4]) / 100}
 
-    call checkVfdFaults()
+    ; --- poll VFD: output current (function 04, item 2 = OutA) ---
+    M260.4 P1 A1 B{0x04, 0x01, 0x02} R5 V"outA"
+    set global.vfdAmps = {(var.outA[3] * 256 + var.outA[4]) / 10}
 
-    var shouldRun = (spindles[0].state == "forward" || spindles[0].state == "reverse")
-    var vfdRunning = (global.spindleState == "CW" || global.spindleState == "CCW")
+    ; --- desired state from the object model ---
+    var want = "STOP"
+    if spindles[0].state == "forward"
+        set var.want = "CW"
+    elif spindles[0].state == "reverse"
+        set var.want = "CCW"
 
-    if !var.shouldRun && var.vfdRunning
-        call stopSpindle()
-        continue
+    ; --- start / stop / direction (function 03: 0x01 fwd, 0x11 rev, 0x08 stop) ---
+    if var.want != global.vfdState
+        if global.vfdState != "STOP"
+            M260.4 P1 A1 B{0x03, 0x01, 0x08} R3
+            set global.vfdState = "STOP"
+            set global.vfdSetHz100 = 0
+            M118 P0 S"VFD: stop"
+        if var.want != "STOP"
+            ; wait (bounded, ~30s) for coast-down before starting or reversing;
+            ; the Huanyang rejects direction changes while the output is live
+            var waited = 0
+            while var.waited < 150
+                M260.4 P1 A1 B{0x04, 0x01, 0x01} R5 V"coastF"
+                if var.coastF[3] == 0 && var.coastF[4] == 0
+                    break
+                set var.waited = var.waited + 1
+                G4 P200
+            if var.want == "CW"
+                M260.4 P1 A1 B{0x03, 0x01, 0x01} R3
+            else
+                M260.4 P1 A1 B{0x03, 0x01, 0x11} R3
+            set global.vfdState = var.want
+            M118 P0 S{"VFD: run " ^ var.want}
 
-    if spindles[0].state == "forward" && global.spindleState != "CW"
-        call setSpindleDirection("CW")
-    elif spindles[0].state == "reverse" && global.spindleState != "CCW"
-        call setSpindleDirection("CCW")
-
-    if var.shouldRun && spindles[0].active > 0
-        call setSpindleSpeed(spindles[0].active)
+    ; --- speed (function 05, value = Hz x 100; VFD ramps per PD014/PD015) ---
+    if global.vfdState != "STOP"
+        var hz100 = {floor(spindles[0].active * 40000 / spindles[0].max)}
+        if var.hz100 > 40000
+            set var.hz100 = 40000
+        if var.hz100 != global.vfdSetHz100
+            M260.4 P1 A1 B{0x05, 0x02, floor(var.hz100 / 256), mod(var.hz100, 256)} R4
+            set global.vfdSetHz100 = var.hz100
 
 M118 P0 S"VFD daemon stopped"
