@@ -51,9 +51,11 @@ M574 Z2 S1 P"^D.12"             ; Z-MAX
 
 ; Spindle - hardware enable/direction, speed over RS485 (Huanyang VFD)
 ; Wiring: SP-EN -> VFD FOR, SP-DIR -> VFD REV, SP-COM -> VFD DCM. VFD: PD001=1
-; (terminal run = failsafe stop path), PD002=2 (RS485 speed). If enable or
-; direction act inverted, prefix C.5 / B.0 with '!' - optoisolator polarity
-; depends on the V-EN / V-DIR jumpers (MACHINE.md s.6).
+; (terminal run = failsafe stop path), PD002=2 (RS485 speed), PD044=1 (FOR
+; terminal = RUN), PD045=5 (REV terminal = F/R direction switch) - HY manual
+; "RUN, DCM, F/R" wiring, p.35. If enable or direction act inverted, prefix
+; C.5 / B.0 with '!' - optoisolator polarity depends on the V-EN / V-DIR
+; jumpers (MACHINE.md s.6).
 M950 R0 C"B.1+C.5+B.0" L0:24000 ; PWM (unused), enable spindleen, dir spindledir
 M563 P0 R0 S"Spindle"           ; Tool 0
 M453                            ; CNC mode (no parameters in RRF 3.3+)
